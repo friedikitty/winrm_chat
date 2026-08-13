@@ -3,6 +3,32 @@
 A small [uv](https://docs.astral.sh/uv/)-based TUI tool that guides you through
 connecting to a remote Windows machine over WinRM, using the `pywinrm` module.
 
+## Quick Start
+
+**1. On the server** (once, as Administrator):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File setup_host_winrm.ps1
+```
+
+**2. On your machine**:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File start_local.ps1
+```
+
+(or `uv run winrm_remote.py`)
+
+**3. Follow the prompts** - host, HTTPS/HTTP, username, password (hidden
+input) - and you land in a remote PowerShell loop:
+
+```
+[7.25.112.232] PS C:\Users\Administrator> hostname
+SERVER01
+[7.25.112.232] PS C:\Users\Administrator> cd .\Documents
+[7.25.112.232] PS C:\Users\Administrator\Documents> exit
+```
+
 ## Features
 
 - Guided 3-step flow: target -> credentials -> connect & verify
