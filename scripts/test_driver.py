@@ -8,8 +8,12 @@
 # ///
 # Test driver: runs winrm_remote.main() with getpass patched, so the
 # guided flow can be exercised non-interactively (piped stdin).
+# Run: uv run --script scripts/test_driver.py
 import getpass
+import pathlib
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 getpass.getpass = lambda prompt="": "wrongpass"
 

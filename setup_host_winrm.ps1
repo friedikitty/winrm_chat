@@ -13,6 +13,9 @@ Enable-PSRemoting -Force -SkipNetworkProfileCheck
 
 Write-Host "=== Configure WinRM Service ===" -ForegroundColor Cyan
 
+# Ensure the service survives reboots.
+Set-Service WinRM -StartupType Automatic
+
 # Allow Basic authentication
 winrm set winrm/config/service/auth '@{Basic="true"}'
 
@@ -122,6 +125,9 @@ try
 
         Write-Host "HTTPS listener created on port 5986." `
             -ForegroundColor Green
+
+        # Restart so the new HTTPS binding is picked up immediately.
+        Restart-Service WinRM
     }
 }
 catch
@@ -155,6 +161,24 @@ foreach ($p in 5985, 5986)
         Write-Host "Port ${p}: not listening" -ForegroundColor Yellow
     }
 }
+
+
+Write-Host "=== External Reachability ===" -ForegroundColor Cyan
+
+# WinRM may listen locally while clients still cannot connect: the
+# final hop is decided OUTSIDE this machine (cloud security group,
+# edge firewall). List the addresses clients would target.
+Get-NetIPAddress -AddressFamily IPv4 |
+    Where-Object { $_.IPAddress -ne "127.0.0.1" -and
+                   $_.PrefixOrigin -ne "WellKnown" } |
+    ForEach-Object {
+        Write-Host "Local IPv4: $($_.IPAddress) ($($_.InterfaceAlias))"
+    }
+
+Write-Host ("If a port shows LISTENING above but clients still cannot " +
+    "connect, allow inbound TCP on that port in the cloud security " +
+    "group / network ACL of this VM -- the Windows firewall alone is " +
+    "not enough on cloud VMs.") -ForegroundColor Yellow
 
 
 Write-Host ""

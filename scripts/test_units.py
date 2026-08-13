@@ -7,12 +7,16 @@
 # ]
 # ///
 # Unit/integration tests for winrm_remote.py helpers and command loop,
-# using a fake session (no real server needed). Run: uv run --script _test_units.py
+# using a fake session (no real server needed).
+# Run: uv run --script scripts/test_units.py
 import io
+import pathlib
 import sys
 from collections import namedtuple
 
 from rich.console import Console
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 import winrm_remote as wr
 

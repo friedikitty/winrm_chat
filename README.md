@@ -51,12 +51,19 @@ powershell -ExecutionPolicy Bypass -File setup_host_winrm.ps1
 
 It enables PSRemoting (HTTP listener on 5985), Basic auth, `AllowUnencrypted`,
 the WinRM firewall rules, and an HTTPS listener on 5986 (reusing a valid
-server certificate, or creating a self-signed one when none exists), then
-prints the active listeners.
+server certificate, or creating a self-signed one when none exists), sets
+the WinRM service to start automatically, and restarts it so the HTTPS
+binding is live immediately. At the end it prints the active listeners,
+probes both ports locally, and lists the machine's IPv4 addresses.
 
 The client tool ignores certificate validation for HTTPS
 (`server_cert_validation="ignore"`), so a self-signed cert works out of
 the box - fine for trusted networks, but verify the host by other means.
+
+If a port shows LISTENING on the server but clients still cannot connect,
+the block is outside the machine: allow inbound TCP on the port in the
+cloud security group / network ACL (the Windows firewall alone is not
+enough on cloud VMs).
 
 If a connection fails, the tool prints these hints automatically.
 
@@ -67,7 +74,8 @@ If a connection fails, the tool prints these hints automatically.
 - `start_local.ps1` - launcher: runs the tool via uv from the script folder,
   keeps the window open (double-click friendly)
 - `setup_host_winrm.ps1` - server-side WinRM setup (run as Administrator)
-- `_test_driver.py` - dev aid: runs the guided flow non-interactively with
-  `getpass` patched, e.g. `printf '127.0.0.1\nn\n5985\nntlm\nadmin\n' | uv run --script _test_driver.py`
-- `_test_units.py` - tests for output cleanup / cd handling using a fake
-  session: `uv run --script _test_units.py`
+- `scripts/test_driver.py` - dev aid: runs the guided flow non-interactively
+  with `getpass` patched, e.g.
+  `printf '127.0.0.1\n\n\n\nadmin\n' | uv run --script scripts/test_driver.py`
+- `scripts/test_units.py` - tests for output cleanup / cd handling using a
+  fake session: `uv run --script scripts/test_units.py`
