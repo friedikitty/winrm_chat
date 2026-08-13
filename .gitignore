@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Pre-commit check report (check-before-commit skill)
+.cursor/pre-commit-report.md

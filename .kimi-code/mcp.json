@@ -1,0 +1,16 @@
+{
+    "mcpServers":  {
+                       "windows-admin":  {
+                                             "command":  "C:/Program Files/uv/uv.exe",
+                                             "args":  [
+                                                          "run",
+                                                          "--project",
+                                                          "G:/github/windows-admin-mcp",
+                                                          "windows-admin-mcp"
+                                                      ],
+                                             "env":  {
+                                                         "WINDOWS_ADMIN_LOG_DIR":  "G:/github/windows-admin-mcp/logs"
+                                                     }
+                                         }
+                   }
+}
