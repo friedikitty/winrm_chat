@@ -57,84 +57,136 @@ else
 
 Write-Host "=== HTTPS Listener (5986) ===" -ForegroundColor Cyan
 
+# WinRM accepts an HTTPS binding only when the listener's HostName matches
+# the certificate's CN, and HostName defaults to the machine's FQDN.
+# A certificate issued for $env:COMPUTERNAME alone therefore fails on any
+# machine with a DNS suffix, with the misleading message
+# "this machine does not have an appropriate certificate".
+# Derive the real name once and use it for BOTH the cert and the listener.
+$cs = Get-CimInstance Win32_ComputerSystem
+if ($cs.PartOfDomain -and $cs.Domain)
+{
+    $dnsHost = "$($cs.DNSHostName).$($cs.Domain)"
+}
+elseif ($cs.DNSHostName)
+{
+    $dnsHost = $cs.DNSHostName
+}
+else
+{
+    $dnsHost = $env:COMPUTERNAME
+}
+
+Write-Host "Certificate CN / listener HostName: $dnsHost"
+
 # Wrapped in try/catch: HTTPS is optional, HTTP above already works.
 try
 {
-    $httpsListener = Get-ChildItem WSMan:\LocalHost\Listener |
-        Where-Object { $_.Keys -contains "Transport=HTTPS" }
+    # Reuse a certificate only if it would actually satisfy WinRM: right CN,
+    # private key present, unexpired, usable for server auth.
+    # The EKU is matched by OID, not FriendlyName -- the friendly name is
+    # localized on non-English Windows and never equals the literal string
+    # "Server Authentication" there.
+    $cert = Get-ChildItem Cert:\LocalMachine\My |
+        Where-Object {
+            $_.HasPrivateKey -and
+            $_.NotAfter -gt (Get-Date) -and
+            $_.Subject -match "^CN=$([regex]::Escape($dnsHost))(,|$)" -and
+            (-not $_.EnhancedKeyUsageList -or
+             $_.EnhancedKeyUsageList.ObjectId -contains "1.3.6.1.5.5.7.3.1")
+        } |
+        Sort-Object NotAfter -Descending |
+        Select-Object -First 1
 
-    if ($httpsListener)
+    if (-not $cert)
     {
-        Write-Host "HTTPS listener already exists, skipping."
+        Write-Host "No matching certificate found, creating self-signed..."
+        $names = @($dnsHost, $env:COMPUTERNAME) | Select-Object -Unique
+        try
+        {
+            $cert = New-SelfSignedCertificate `
+                -DnsName $names `
+                -CertStoreLocation "Cert:\LocalMachine\My" `
+                -NotAfter (Get-Date).AddYears(5)
+        }
+        catch
+        {
+            # PowerShell 4 (Server 2012 R2) only accepts -DnsName and
+            # -CertStoreLocation; that build defaults to a 1-year cert.
+            $cert = New-SelfSignedCertificate `
+                -DnsName $names `
+                -CertStoreLocation "Cert:\LocalMachine\My"
+        }
+    }
+
+    Write-Host "Using certificate: $($cert.Subject)"
+    Write-Host "Thumbprint: $($cert.Thumbprint)  Expires: $($cert.NotAfter)"
+
+    # Always drop an existing HTTPS listener instead of skipping it: a
+    # previous run may have left one bound to a certificate that is now
+    # deleted or expired, in which case port 5986 never comes up and
+    # "already exists" hides the problem forever. WinRM also refuses a
+    # second listener on the same transport, -Force or not.
+    Get-ChildItem WSMan:\LocalHost\Listener |
+        Where-Object { $_.Keys -contains "Transport=HTTPS" } |
+        ForEach-Object {
+            Write-Host "Removing existing HTTPS listener."
+            Remove-Item -Path $_.PSPath -Recurse -Force
+        }
+
+    New-Item `
+        -Path WSMan:\LocalHost\Listener `
+        -Transport HTTPS `
+        -Address * `
+        -HostName $dnsHost `
+        -CertificateThumbPrint $cert.Thumbprint `
+        -Force | Out-Null
+
+    # The built-in HTTPS firewall rule is named differently (or missing)
+    # depending on the build. Enable whichever one exists -- an existing
+    # but DISABLED rule must be enabled, not skipped -- and create one
+    # only when neither is present. Existence is checked with
+    # -ErrorAction SilentlyContinue because with $ErrorActionPreference
+    # = "Stop" a missing rule throws a CIM "not found" error that
+    # try/catch does not reliably intercept.
+    $rule = Get-NetFirewallRule -Name "WINRM-HTTPS-In-TCP" `
+        -ErrorAction SilentlyContinue
+    if (-not $rule)
+    {
+        $rule = Get-NetFirewallRule `
+            -DisplayName "Windows Remote Management (HTTPS-In)" `
+            -ErrorAction SilentlyContinue
+    }
+
+    if ($rule)
+    {
+        $rule | Enable-NetFirewallRule
     }
     else
     {
-        # Find a valid server-auth certificate with a private key;
-        # create a self-signed one when none is available.
-        $cert = Get-ChildItem Cert:\LocalMachine\My |
-            Where-Object {
-                $eku = @($_.EnhancedKeyUsageList)
-                $_.HasPrivateKey -and
-                $_.NotAfter -gt (Get-Date) -and
-                ($eku.Count -eq 0 -or
-                 $eku.FriendlyName -contains "Server Authentication")
-            } |
-            Sort-Object NotAfter -Descending |
-            Select-Object -First 1
-
-        if (-not $cert)
-        {
-            Write-Host "No suitable certificate found, creating self-signed..."
-            $cert = New-SelfSignedCertificate `
-                -DnsName $env:COMPUTERNAME `
-                -CertStoreLocation "Cert:\LocalMachine\My" `
-                -NotAfter (Get-Date).AddYears(5) `
-                -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.1")
-        }
-
-        Write-Host "Using certificate: $($cert.Subject)"
-        Write-Host "Thumbprint: $($cert.Thumbprint)"
-
-        New-Item `
-            -Path WSMan:\LocalHost\Listener `
-            -Transport HTTPS `
-            -Address * `
-            -CertificateThumbPrint $cert.Thumbprint `
-            -Force | Out-Null
-
-        # The built-in HTTPS firewall rule does not exist on all
-        # systems. Check before enabling: with $ErrorActionPreference
-        # = "Stop" a missing rule throws a CIM "not found" error that
-        # try/catch does not reliably intercept.
-        if (Get-NetFirewallRule -Name "WINRM-HTTPS-In-TCP" `
-                -ErrorAction SilentlyContinue)
-        {
-            Enable-NetFirewallRule -Name "WINRM-HTTPS-In-TCP"
-        }
-        elseif (-not (Get-NetFirewallRule `
-                -DisplayName "Windows Remote Management (HTTPS-In)" `
-                -ErrorAction SilentlyContinue))
-        {
-            New-NetFirewallRule `
-                -DisplayName "Windows Remote Management (HTTPS-In)" `
-                -Direction Inbound `
-                -Protocol TCP `
-                -LocalPort 5986 `
-                -Action Allow | Out-Null
-        }
-
-        Write-Host "HTTPS listener created on port 5986." `
-            -ForegroundColor Green
-
-        # Restart so the new HTTPS binding is picked up immediately.
-        Restart-Service WinRM
+        New-NetFirewallRule `
+            -DisplayName "Windows Remote Management (HTTPS-In)" `
+            -Direction Inbound `
+            -Protocol TCP `
+            -LocalPort 5986 `
+            -Action Allow | Out-Null
     }
+
+    Write-Host "HTTPS listener created on port 5986." `
+        -ForegroundColor Green
+
+    # Restart so the new HTTPS binding is picked up immediately.
+    # NOTE: this drops the connection if you are running this script
+    # THROUGH WinRM. Run it locally / via console or RDP.
+    Restart-Service WinRM
 }
 catch
 {
-    Write-Host "HTTPS setup failed (HTTP still works):" `
-        -ForegroundColor Yellow
-    Write-Host $_.Exception.Message
+    # Print the whole error record, not just the message: without the
+    # failing command and line this failure cannot be diagnosed at all.
+    Write-Host "HTTPS setup FAILED (HTTP on 5985 still works)." `
+        -ForegroundColor Red
+    Write-Host ($_ | Out-String) -ForegroundColor Red
 }
 
 
