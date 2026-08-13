@@ -23,10 +23,10 @@ powershell -ExecutionPolicy Bypass -File start_local.ps1
 input) - and you land in a remote PowerShell loop:
 
 ```
-[7.25.112.232] PS C:\Users\Administrator> hostname
+[7.25.112.232] PS C:\Users\<user>> hostname
 SERVER01
-[7.25.112.232] PS C:\Users\Administrator> cd .\Documents
-[7.25.112.232] PS C:\Users\Administrator\Documents> exit
+[7.25.112.232] PS C:\Users\<user>> cd .\Documents
+[7.25.112.232] PS C:\Users\<user>\Documents> exit
 ```
 
 ## Features
